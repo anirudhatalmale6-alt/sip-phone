@@ -4,6 +4,7 @@ SIP Phone - Simple Windows SIP Dialer (PJSUA2)
 import tkinter as tk
 from tkinter import messagebox
 import threading
+import queue
 import json
 import os
 import sys
@@ -63,22 +64,25 @@ class MyCall(pj.Call):
         self.app = app
 
     def onCallState(self, prm):
-        ci = self.getInfo()
-        state_text = ci.stateText
-        self.app.log(f"Call state: {state_text} (code {ci.lastStatusCode})")
+        try:
+            ci = self.getInfo()
+            state_text = ci.stateText
+            self.app.log(f"Call state: {state_text} (code {ci.lastStatusCode})")
 
-        if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
-            self.app.root.after(0, lambda: self.app.call_status_var.set("Connected"))
-            self.app.root.after(0, lambda: self.app.status_label.config(fg="#4CAF50"))
-        elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
-            self.app.log(f"Call disconnected: {ci.lastReason}")
-            self.app.root.after(0, self.app._call_ended)
-        elif ci.state == pj.PJSIP_INV_STATE_CALLING:
-            self.app.root.after(0, lambda: self.app.call_status_var.set("Calling..."))
-        elif ci.state == pj.PJSIP_INV_STATE_EARLY:
-            self.app.root.after(0, lambda: self.app.call_status_var.set("Ringing..."))
-        elif ci.state == pj.PJSIP_INV_STATE_CONNECTING:
-            self.app.root.after(0, lambda: self.app.call_status_var.set("Connecting..."))
+            if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
+                self.app.safe_ui(lambda: self.app.call_status_var.set("Connected"))
+                self.app.safe_ui(lambda: self.app.status_label.config(fg="#4CAF50"))
+            elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
+                self.app.log(f"Call disconnected: {ci.lastReason}")
+                self.app.safe_ui(self.app._call_ended)
+            elif ci.state == pj.PJSIP_INV_STATE_CALLING:
+                self.app.safe_ui(lambda: self.app.call_status_var.set("Calling..."))
+            elif ci.state == pj.PJSIP_INV_STATE_EARLY:
+                self.app.safe_ui(lambda: self.app.call_status_var.set("Ringing..."))
+            elif ci.state == pj.PJSIP_INV_STATE_CONNECTING:
+                self.app.safe_ui(lambda: self.app.call_status_var.set("Connecting..."))
+        except Exception as e:
+            self.app.log(f"onCallState error: {e}")
 
     def onCallMediaState(self, prm):
         ci = self.getInfo()
@@ -106,34 +110,38 @@ class MyAccount(pj.Account):
         self.app = app
 
     def onRegState(self, prm):
-        ai = self.getInfo()
-        self.app.log(f"Registration: {prm.code} {prm.reason}")
-        if prm.code == 200:
-            self.app.is_registered = True
-            self.app.root.after(0, lambda: self.app.status_var.set(
-                f"Registered: {self.app.settings['username']}"))
-            self.app.root.after(0, lambda: self.app.indicator.itemconfig(
-                self.app.indicator_dot, fill="#4CAF50"))
-        else:
-            self.app.is_registered = False
-            self.app.root.after(0, lambda: self.app.status_var.set(
-                f"Reg failed: {prm.code} {prm.reason}"))
-            self.app.root.after(0, lambda: self.app.indicator.itemconfig(
-                self.app.indicator_dot, fill="#ff4444"))
+        try:
+            self.app.log(f"Registration: {prm.code} {prm.reason}")
+            if prm.code == 200:
+                self.app.is_registered = True
+                self.app.safe_ui(lambda: self.app.status_var.set(
+                    f"Registered: {self.app.settings['username']}"))
+                self.app.safe_ui(lambda: self.app.indicator.itemconfig(
+                    self.app.indicator_dot, fill="#4CAF50"))
+            else:
+                self.app.is_registered = False
+                self.app.safe_ui(lambda: self.app.status_var.set(
+                    f"Reg failed: {prm.code} {prm.reason}"))
+                self.app.safe_ui(lambda: self.app.indicator.itemconfig(
+                    self.app.indicator_dot, fill="#ff4444"))
+        except Exception as e:
+            self.app.log(f"onRegState error: {e}")
 
     def onIncomingCall(self, prm):
-        call = MyCall(self, self.app, prm.callId)
-        ci = call.getInfo()
-        self.app.log(f"Incoming call from {ci.remoteUri}")
-        # Auto-answer incoming calls
-        call_prm = pj.CallOpParam()
-        call_prm.statusCode = 200
-        call.answer(call_prm)
-        self.app.current_call = call
-        self.app.is_calling = True
-        self.app.root.after(0, lambda: self.app.call_status_var.set("Incoming call"))
-        self.app.root.after(0, lambda: self.app.btn_hangup.config(state="normal"))
-        self.app.root.after(0, lambda: self.app.btn_call.config(state="disabled"))
+        try:
+            call = MyCall(self, self.app, prm.callId)
+            ci = call.getInfo()
+            self.app.log(f"Incoming call from {ci.remoteUri}")
+            call_prm = pj.CallOpParam()
+            call_prm.statusCode = 200
+            call.answer(call_prm)
+            self.app.current_call = call
+            self.app.is_calling = True
+            self.app.safe_ui(lambda: self.app.call_status_var.set("Incoming call"))
+            self.app.safe_ui(lambda: self.app.btn_hangup.config(state="normal"))
+            self.app.safe_ui(lambda: self.app.btn_call.config(state="disabled"))
+        except Exception as e:
+            self.app.log(f"onIncomingCall error: {e}")
 
 
 class SIPPhoneApp:
@@ -150,15 +158,35 @@ class SIPPhoneApp:
         self.current_call = None
         self.is_registered = False
         self.is_calling = False
+        self.ui_queue = queue.Queue()
 
         self.build_ui()
+        # Process UI updates from background threads
+        self._poll_ui_queue()
         # Defer SIP connection to after UI is fully ready
-        self.root.after(1000, self.connect_sip)
+        self.root.after(2000, self.connect_sip)
+
+    def safe_ui(self, func):
+        """Thread-safe way to run a function on the UI thread."""
+        self.ui_queue.put(func)
+
+    def _poll_ui_queue(self):
+        """Process pending UI updates from background threads."""
+        try:
+            while True:
+                func = self.ui_queue.get_nowait()
+                try:
+                    func()
+                except Exception as e:
+                    logging.error(f"UI update error: {e}")
+        except queue.Empty:
+            pass
+        self.root.after(100, self._poll_ui_queue)
 
     def log(self, msg):
         logging.info(msg)
         try:
-            self.root.after(0, lambda: self._update_log(msg))
+            self.safe_ui(lambda: self._update_log(msg))
         except:
             pass
 
@@ -279,7 +307,7 @@ class SIPPhoneApp:
             username = self.settings["username"]
             password = self.settings["password"]
 
-            self.root.after(0, lambda: self.status_var.set("Initializing..."))
+            self.safe_ui(lambda: self.status_var.set("Initializing..."))
 
             # Create endpoint
             self.ep = pj.Endpoint()
@@ -288,7 +316,7 @@ class SIPPhoneApp:
             # Endpoint config
             ep_cfg = pj.EpConfig()
             ep_cfg.logConfig.level = 4
-            ep_cfg.logConfig.consoleLevel = 4
+            ep_cfg.logConfig.consoleLevel = 0  # Disable console logging to prevent tkinter conflicts
             log_path = os.path.join(LOG_DIR, "sip_pjsip.log")
             ep_cfg.logConfig.filename = log_path
             self.log(f"PJSIP log: {log_path}")
@@ -305,7 +333,7 @@ class SIPPhoneApp:
 
             self.ep.libStart()
             self.log(f"PJSIP started, connecting to {server}:{port}")
-            self.root.after(0, lambda: self.status_var.set("Registering..."))
+            self.safe_ui(lambda: self.status_var.set("Registering..."))
 
             # Account config
             acfg = pj.AccountConfig()
@@ -331,8 +359,8 @@ class SIPPhoneApp:
         except Exception as e:
             err = str(e)
             self.log(f"SIP init error: {err}")
-            self.root.after(0, lambda: self.status_var.set(f"Error: {err[:50]}"))
-            self.root.after(0, lambda: self.indicator.itemconfig(self.indicator_dot, fill="#ff4444"))
+            self.safe_ui(lambda: self.status_var.set(f"Error: {err[:50]}"))
+            self.safe_ui(lambda: self.indicator.itemconfig(self.indicator_dot, fill="#ff4444"))
 
     def dial(self):
         number = self.number_var.get().strip()
@@ -370,8 +398,8 @@ class SIPPhoneApp:
         except Exception as e:
             err = str(e)
             self.log(f"Call error: {err}")
-            self.root.after(0, lambda: self.call_status_var.set(f"Error: {err[:40]}"))
-            self.root.after(0, self._call_ended)
+            self.safe_ui(lambda: self.call_status_var.set(f"Error: {err[:40]}"))
+            self.safe_ui(self._call_ended)
 
     def hangup(self):
         self.log("Hangup pressed")
