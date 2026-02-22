@@ -18,6 +18,7 @@ SETTINGS_FILE = os.path.join(APP_DIR, "sip_settings.json")
 import tempfile
 LOG_DIR = tempfile.gettempdir()
 LOG_FILE = os.path.join(LOG_DIR, "sip_debug.log")
+HANGUP_FILE = os.path.join(LOG_DIR, "sip_hangup.signal")
 
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
@@ -406,6 +407,10 @@ class SIPPhoneApp:
 
             self.log("Account created, waiting for registration...")
 
+            # Clean up any leftover hangup signal
+            if os.path.exists(HANGUP_FILE):
+                os.remove(HANGUP_FILE)
+
             # Since threadCnt=0, we need to poll for events AND process commands
             while True:
                 try:
@@ -422,6 +427,20 @@ class SIPPhoneApp:
                             self.log(f"SIP cmd error: {e}")
                 except queue.Empty:
                     pass
+                # Check for hangup signal file
+                if os.path.exists(HANGUP_FILE):
+                    try:
+                        os.remove(HANGUP_FILE)
+                    except:
+                        pass
+                    self.log("Hangup signal received")
+                    if self.current_call:
+                        try:
+                            prm = pj.CallOpParam()
+                            self.current_call.hangup(prm)
+                        except Exception as e:
+                            self.log(f"Signal hangup error: {e}")
+                    self.safe_ui(self._call_ended)
                 time.sleep(0.02)
 
         except Exception as e:
