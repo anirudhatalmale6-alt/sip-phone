@@ -47,6 +47,11 @@ jobs:
           echo "Running: $cmd"
           Invoke-Expression $cmd
 
+      - name: Copy launcher
+        shell: powershell
+        run: |
+          Copy-Item "launcher.bat" "dist\SIP-Phone\launcher.bat"
+
       - name: Create ZIP
         shell: powershell
         run: |
