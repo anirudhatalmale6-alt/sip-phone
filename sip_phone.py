@@ -11,6 +11,7 @@ import sys
 import time
 import logging
 import traceback
+import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Settings & log file paths
@@ -48,8 +49,29 @@ def save_settings(settings):
         json.dump(settings, f, indent=2)
 
 
+def kill_other_instances():
+    """Kill any other running SIP-Phone.exe processes (except self)."""
+    try:
+        my_pid = os.getpid()
+        # Use taskkill to kill all SIP-Phone.exe except our own PID
+        subprocess.run(
+            f'wmic process where "name=\'SIP-Phone.exe\' and processid!=\'{my_pid}\'" call terminate',
+            shell=True, capture_output=True, timeout=5
+        )
+    except Exception:
+        try:
+            # Fallback: use taskkill
+            subprocess.run('taskkill /f /im SIP-Phone.exe', shell=True,
+                         capture_output=True, timeout=5)
+        except Exception:
+            pass
+
+
 class SIPPhoneApp:
     def __init__(self):
+        # Kill any previous instances running in background
+        kill_other_instances()
+
         self.root = tk.Tk()
         self.root.title("SIP Phone")
         self.root.geometry("320x580")
