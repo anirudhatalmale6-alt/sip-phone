@@ -141,8 +141,10 @@ input[type="tel"]::placeholder {
 </div>
 
 <script>
+var KEEPALIVE_URL = 'http://127.0.0.1:48080';
 var phoneInput = document.getElementById('phoneNumber');
 var statusEl = document.getElementById('status');
+var pingInterval = null;
 
 function addDigit(d) {
     phoneInput.value += d;
@@ -163,19 +165,39 @@ function dialNumber() {
     statusEl.textContent = 'מחייג...';
     window.location.href = 'sipphone://' + number;
 
+    // Start keepalive pings after a short delay
     setTimeout(function() {
-        statusEl.textContent = 'אם התוכנה לא נפתחה, ודא שהתקנת את הפרוטוקול (install_protocol.bat)';
-    }, 3000);
+        startKeepalive();
+        statusEl.textContent = 'שיחה פעילה - אל תסגור דף זה';
+    }, 2000);
 }
 
 function hangupCall() {
-    statusEl.textContent = 'מנתק שיחה...';
-    window.location.href = 'sipphone://hangup';
-
+    stopKeepalive();
+    fetch(KEEPALIVE_URL + '/hangup').catch(function(){});
     setTimeout(function() {
-        statusEl.textContent = 'השיחה נותקה';
-    }, 1500);
+        window.location.href = 'sipphone://hangup';
+    }, 200);
+    statusEl.textContent = 'השיחה נותקה';
 }
+
+function startKeepalive() {
+    stopKeepalive();
+    pingInterval = setInterval(function() {
+        fetch(KEEPALIVE_URL + '/ping').catch(function(){});
+    }, 1000);
+}
+
+function stopKeepalive() {
+    if (pingInterval) {
+        clearInterval(pingInterval);
+        pingInterval = null;
+    }
+}
+
+window.addEventListener('beforeunload', function() {
+    stopKeepalive();
+});
 </script>
 </body>
 </html>

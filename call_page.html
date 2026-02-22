@@ -76,8 +76,14 @@ h1 {
 .btn-hangup:active {
     transform: scale(0.98);
 }
+.status {
+    margin-top: 15px;
+    font-size: 14px;
+    color: #4CAF50;
+    min-height: 20px;
+}
 .note {
-    margin-top: 20px;
+    margin-top: 10px;
     font-size: 13px;
     color: #777;
 }
@@ -87,10 +93,58 @@ h1 {
 <div class="card">
     <h1>התקשר אלינו</h1>
     <div class="number">0527172458</div>
-    <a class="btn-call" href="sipphone://0527172458">📞 חייג עכשיו</a>
+    <button class="btn-call" onclick="dialNumber()">📞 חייג עכשיו</button>
     <br>
-    <a class="btn-hangup" href="sipphone://hangup">📕 נתק שיחה</a>
-    <div class="note">לחץ על "חייג" להתחלת שיחה, "נתק" לסיום</div>
+    <button class="btn-hangup" onclick="hangupCall()">📕 נתק שיחה</button>
+    <div class="status" id="status"></div>
+    <div class="note">סגירת הדף מנתקת את השיחה אוטומטית</div>
 </div>
+
+<script>
+var KEEPALIVE_URL = 'http://127.0.0.1:48080';
+var pingInterval = null;
+var statusEl = document.getElementById('status');
+
+function dialNumber() {
+    statusEl.textContent = 'מחייג...';
+    window.location.href = 'sipphone://0527172458';
+
+    // Start keepalive pings after a short delay (let app start)
+    setTimeout(function() {
+        startKeepalive();
+        statusEl.textContent = 'שיחה פעילה - אל תסגור דף זה';
+    }, 2000);
+}
+
+function hangupCall() {
+    stopKeepalive();
+    // Try HTTP hangup first (more reliable)
+    fetch(KEEPALIVE_URL + '/hangup').catch(function(){});
+    // Also try protocol handler as fallback
+    setTimeout(function() {
+        window.location.href = 'sipphone://hangup';
+    }, 200);
+    statusEl.textContent = 'השיחה נותקה';
+}
+
+function startKeepalive() {
+    stopKeepalive();
+    pingInterval = setInterval(function() {
+        fetch(KEEPALIVE_URL + '/ping').catch(function(){});
+    }, 1000);
+}
+
+function stopKeepalive() {
+    if (pingInterval) {
+        clearInterval(pingInterval);
+        pingInterval = null;
+    }
+}
+
+// Stop keepalive when page closes -> triggers auto-hangup
+window.addEventListener('beforeunload', function() {
+    stopKeepalive();
+});
+</script>
 </body>
 </html>

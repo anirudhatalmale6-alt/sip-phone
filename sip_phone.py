@@ -11,6 +11,7 @@ import sys
 import time
 import logging
 import traceback
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Settings & log file paths
 APP_DIR = os.getcwd()
@@ -67,8 +68,9 @@ class SIPPhoneApp:
         self.sip_queue = queue.Queue()  # Commands for the SIP thread
         self.auto_dial_number = None
         self.auto_dial_done = False
-        self.call_start_time = None
-        self.call_timeout = 120  # Auto-hangup after 120 seconds in hidden mode
+        self.last_keepalive = None  # Last keepalive ping from browser
+        self.keepalive_timeout = 3  # Hangup if no ping for 3 seconds
+        self.http_port = 48080  # Local HTTP server port for keepalive
 
         # Check for phone number in command line args
         self._parse_args()
@@ -76,6 +78,7 @@ class SIPPhoneApp:
         # Hidden mode - withdraw window so it's completely invisible
         if self.hidden_mode:
             self.root.withdraw()
+            self._start_keepalive_server()
 
         self.build_ui()
         self._poll_ui_queue()
@@ -87,6 +90,47 @@ class SIPPhoneApp:
             self.on_connect_click()
         else:
             self.log("UI ready. Click Connect to start.")
+
+    def _start_keepalive_server(self):
+        """Start a local HTTP server for browser keepalive pings."""
+        app = self
+        class KeepAliveHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/ping":
+                    app.last_keepalive = time.time()
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"pong")
+                elif self.path == "/hangup":
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+                    # Create hangup signal
+                    try:
+                        with open(HANGUP_FILE, 'w') as f:
+                            f.write("hangup")
+                    except:
+                        pass
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            def log_message(self, format, *args):
+                pass  # Suppress HTTP logs
+
+        def run_server():
+            try:
+                server = HTTPServer(("127.0.0.1", self.http_port), KeepAliveHandler)
+                server.serve_forever()
+            except Exception as e:
+                logging.error(f"Keepalive server error: {e}")
+
+        t = threading.Thread(target=run_server, daemon=True)
+        t.start()
+        self.log(f"Keepalive server on port {self.http_port}")
 
     def _parse_args(self):
         """Parse command line for phone number and flags. Supports:
@@ -332,10 +376,8 @@ class SIPPhoneApp:
                         ci = ch_self.getInfo()
                         ch_self.app.log(f"Call: {ci.stateText} ({ci.lastStatusCode})")
                         if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
-                            ch_self.app.call_start_time = time.time()
                             ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Connected"))
                         elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
-                            ch_self.app.call_start_time = None
                             ch_self.app.safe_ui(ch_self.app._call_ended)
                         elif ci.state == pj.PJSIP_INV_STATE_CALLING:
                             ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Calling..."))
@@ -455,17 +497,17 @@ class SIPPhoneApp:
                         except Exception as e:
                             self.log(f"Signal hangup error: {e}")
                     self.safe_ui(self._call_ended)
-                # Auto-timeout in hidden mode
-                if self.hidden_mode and self.call_start_time and self.current_call:
-                    elapsed = time.time() - self.call_start_time
-                    if elapsed >= self.call_timeout:
-                        self.log(f"Auto-timeout: call exceeded {self.call_timeout}s")
+                # Keepalive timeout - if browser closed (no ping), hangup
+                if self.hidden_mode and self.last_keepalive and self.current_call:
+                    since_ping = time.time() - self.last_keepalive
+                    if since_ping >= self.keepalive_timeout:
+                        self.log(f"Browser disconnected (no ping for {since_ping:.1f}s), hanging up")
                         try:
                             prm = pj.CallOpParam()
                             self.current_call.hangup(prm)
                         except Exception as e:
-                            self.log(f"Timeout hangup error: {e}")
-                        self.call_start_time = None
+                            self.log(f"Keepalive hangup error: {e}")
+                        self.last_keepalive = None
                         self.safe_ui(self._call_ended)
                 time.sleep(0.02)
 
@@ -529,7 +571,6 @@ class SIPPhoneApp:
     def _call_ended(self):
         self.current_call = None
         self.is_calling = False
-        self.call_start_time = None
         self.call_status_var.set("")
         self.btn_call.config(state="normal")
         self.btn_hangup.config(state="disabled")
