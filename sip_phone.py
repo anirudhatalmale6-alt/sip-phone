@@ -62,6 +62,7 @@ class SIPPhoneApp:
         self.is_calling = False
         self.pj_loaded = False
         self.ui_queue = queue.Queue()
+        self.sip_queue = queue.Queue()  # Commands for the SIP thread
 
         self.build_ui()
         self._poll_ui_queue()
@@ -355,13 +356,23 @@ class SIPPhoneApp:
 
             self.log("Account created, waiting for registration...")
 
-            # Since threadCnt=0, we need to poll for events
+            # Since threadCnt=0, we need to poll for events AND process commands
             while True:
                 try:
-                    self.ep.libHandleEvents(100)
+                    self.ep.libHandleEvents(50)
                 except:
                     pass
-                time.sleep(0.05)
+                # Process any queued SIP commands (dial, hangup, etc)
+                try:
+                    while True:
+                        cmd = self.sip_queue.get_nowait()
+                        try:
+                            cmd()
+                        except Exception as e:
+                            self.log(f"SIP cmd error: {e}")
+                except queue.Empty:
+                    pass
+                time.sleep(0.02)
 
         except Exception as e:
             err = str(e)
@@ -388,31 +399,37 @@ class SIPPhoneApp:
         self.call_status_var.set(f"Calling {number}...")
         self.log(f"Dialing: {number}")
 
-        try:
-            server = self.settings["server"]
-            call = self.CallHandler(self.acc, self)
-            call_prm = pj.CallOpParam(True)
-            dest_uri = f"sip:{number}@{server}"
-            self.log(f"URI: {dest_uri}")
-            call.makeCall(dest_uri, call_prm)
-            self.current_call = call
-            self.is_calling = True
-            self.log("Call initiated")
-        except Exception as e:
-            err = str(e)
-            self.log(f"Call error: {err}")
-            self.call_status_var.set(f"Error: {err[:40]}")
-            self._call_ended()
+        # Queue the call to the SIP thread
+        def do_call():
+            try:
+                server = self.settings["server"]
+                call = self.CallHandler(self.acc, self)
+                call_prm = pj.CallOpParam(True)
+                dest_uri = f"sip:{number}@{server}"
+                self.log(f"URI: {dest_uri}")
+                call.makeCall(dest_uri, call_prm)
+                self.current_call = call
+                self.is_calling = True
+                self.log("Call initiated")
+            except Exception as e:
+                err = str(e)
+                self.log(f"Call error: {err}")
+                self.safe_ui(lambda: self.call_status_var.set(f"Error: {err[:40]}"))
+                self.safe_ui(self._call_ended)
+
+        self.sip_queue.put(do_call)
 
     def hangup(self):
         self.log("Hangup pressed")
-        if self.current_call:
-            try:
-                prm = pj.CallOpParam()
-                self.current_call.hangup(prm)
-            except Exception as e:
-                self.log(f"Hangup error: {e}")
-        self._call_ended()
+        def do_hangup():
+            if self.current_call:
+                try:
+                    prm = pj.CallOpParam()
+                    self.current_call.hangup(prm)
+                except Exception as e:
+                    self.log(f"Hangup error: {e}")
+            self.safe_ui(self._call_ended)
+        self.sip_queue.put(do_hangup)
 
     def _call_ended(self):
         self.current_call = None
