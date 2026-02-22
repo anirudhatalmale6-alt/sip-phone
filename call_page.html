@@ -55,6 +55,27 @@ h1 {
 .btn-call:active {
     transform: scale(0.98);
 }
+.btn-hangup {
+    display: inline-block;
+    background: #e94560;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 22px;
+    font-weight: bold;
+    padding: 18px 50px;
+    cursor: pointer;
+    text-decoration: none;
+    margin-top: 15px;
+    transition: background 0.2s, transform 0.1s;
+}
+.btn-hangup:hover {
+    background: #c62828;
+    transform: scale(1.05);
+}
+.btn-hangup:active {
+    transform: scale(0.98);
+}
 .note {
     margin-top: 20px;
     font-size: 13px;
@@ -67,7 +88,9 @@ h1 {
     <h1>התקשר אלינו</h1>
     <div class="number">0527172458</div>
     <a class="btn-call" href="sipphone://0527172458">📞 חייג עכשיו</a>
-    <div class="note">לחץ על הכפתור כדי לחייג דרך תוכנת SIP-Phone</div>
+    <br>
+    <a class="btn-hangup" href="sipphone://hangup">📕 נתק שיחה</a>
+    <div class="note">לחץ על "חייג" להתחלת שיחה, "נתק" לסיום</div>
 </div>
 </body>
 </html>

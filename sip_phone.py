@@ -103,12 +103,22 @@ class SIPPhoneApp:
         for arg in args:
             arg = arg.strip()
             # Strip protocol prefix if present
+            raw_arg = arg
             for prefix in ["sipphone://", "sipphone:", "tel://", "tel:"]:
                 if arg.lower().startswith(prefix):
                     arg = arg[len(prefix):]
                     break
             # Strip trailing slash
             arg = arg.rstrip("/")
+            # Check for hangup command
+            if arg.lower() == "hangup":
+                # Create hangup signal file and exit immediately
+                try:
+                    with open(HANGUP_FILE, 'w') as f:
+                        f.write("hangup")
+                except:
+                    pass
+                os._exit(0)
             # Clean the number - keep digits, *, #, +
             cleaned = ''.join(c for c in arg if c in '0123456789*#+')
             if cleaned:
