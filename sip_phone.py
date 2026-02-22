@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import logging
+import traceback
 
 # Settings file path
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -18,7 +19,19 @@ LOG_FILE = os.path.join(APP_DIR, "sip_debug.log")
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
 
-import pjsua2 as pj
+try:
+    import pjsua2 as pj
+except Exception as e:
+    err_msg = f"Failed to load pjsua2:\n{e}\n\n{traceback.format_exc()}"
+    logging.error(err_msg)
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("SIP Phone Error", err_msg)
+        root.destroy()
+    except:
+        print(err_msg)
+    sys.exit(1)
 
 DEFAULT_SETTINGS = {
     "server": "172.104.203.87",
@@ -463,5 +476,18 @@ class SIPPhoneApp:
 
 
 if __name__ == "__main__":
-    app = SIPPhoneApp()
-    app.run()
+    try:
+        app = SIPPhoneApp()
+        app.run()
+    except Exception as e:
+        err_msg = f"Fatal error:\n{e}\n\n{traceback.format_exc()}"
+        logging.error(err_msg)
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("SIP Phone Error", err_msg)
+            root.destroy()
+        except:
+            print(err_msg)
+        input("Press Enter to close...")
+        sys.exit(1)
