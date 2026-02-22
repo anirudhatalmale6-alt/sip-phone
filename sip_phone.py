@@ -63,10 +63,42 @@ class SIPPhoneApp:
         self.pj_loaded = False
         self.ui_queue = queue.Queue()
         self.sip_queue = queue.Queue()  # Commands for the SIP thread
+        self.auto_dial_number = None
+        self.auto_dial_done = False
+
+        # Check for phone number in command line args
+        self._parse_args()
 
         self.build_ui()
         self._poll_ui_queue()
-        self.log("UI ready. Click Connect to start.")
+
+        if self.auto_dial_number:
+            self.number_var.set(self.auto_dial_number)
+            self.log(f"Auto-dial: {self.auto_dial_number}")
+            # Auto-connect and dial
+            self.on_connect_click()
+        else:
+            self.log("UI ready. Click Connect to start.")
+
+    def _parse_args(self):
+        """Parse command line for phone number. Supports:
+        - SIP-Phone.exe 0501234567
+        - SIP-Phone.exe sipphone://0501234567
+        - SIP-Phone.exe sipphone:0501234567
+        """
+        if len(sys.argv) > 1:
+            arg = sys.argv[1].strip()
+            # Strip protocol prefix if present
+            for prefix in ["sipphone://", "sipphone:", "tel://", "tel:"]:
+                if arg.lower().startswith(prefix):
+                    arg = arg[len(prefix):]
+                    break
+            # Strip trailing slash
+            arg = arg.rstrip("/")
+            # Clean the number - keep digits, *, #, +
+            cleaned = ''.join(c for c in arg if c in '0123456789*#+')
+            if cleaned:
+                self.auto_dial_number = cleaned
 
     def safe_ui(self, func):
         """Thread-safe way to run a function on the UI thread."""
@@ -314,6 +346,10 @@ class SIPPhoneApp:
                                 ah_self.app.indicator_dot, fill="#4CAF50"))
                             ah_self.app.safe_ui(lambda: ah_self.app.btn_connect.config(
                                 text="Connected", state="disabled"))
+                            # Auto-dial if launched with a phone number
+                            if ah_self.app.auto_dial_number and not ah_self.app.auto_dial_done:
+                                ah_self.app.auto_dial_done = True
+                                ah_self.app.safe_ui(ah_self.app.dial)
                         elif prm.code >= 300:
                             ah_self.app.safe_ui(lambda: ah_self.app.status_var.set(
                                 f"Reg failed: {prm.code}"))

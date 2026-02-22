@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+; Register sipphone:// URL protocol handler
+; IMPORTANT: Change the path below to match where SIP-Phone.exe is on your computer
+
+[HKEY_CLASSES_ROOT\sipphone]
+@="URL:SIP Phone Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\sipphone\shell]
+
+[HKEY_CLASSES_ROOT\sipphone\shell\open]
+
+[HKEY_CLASSES_ROOT\sipphone\shell\open\command]
+@="\"C:\\SIP-Phone\\SIP-Phone.exe\" \"%1\""

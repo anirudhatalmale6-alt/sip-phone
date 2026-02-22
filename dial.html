@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>חייגן טלפון</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #1a1a2e;
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+.dialer {
+    background: #16213e;
+    border-radius: 16px;
+    padding: 30px;
+    width: 320px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+h1 {
+    color: #e94560;
+    font-size: 24px;
+    margin-bottom: 20px;
+}
+.input-wrap {
+    background: #0f3460;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 15px;
+}
+input[type="tel"] {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    text-align: center;
+    outline: none;
+    direction: ltr;
+}
+input[type="tel"]::placeholder {
+    color: #666;
+}
+.keypad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 15px;
+}
+.keypad button {
+    background: #0f3460;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.keypad button:hover {
+    background: #1a4a8a;
+}
+.btn-dial {
+    width: 100%;
+    background: #4CAF50;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    padding: 15px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-dial:hover {
+    background: #388E3C;
+}
+.btn-dial:disabled {
+    background: #555;
+    cursor: not-allowed;
+}
+.status {
+    margin-top: 12px;
+    font-size: 13px;
+    color: #999;
+}
+</style>
+</head>
+<body>
+<div class="dialer">
+    <h1>חייג טלפון</h1>
+
+    <div class="input-wrap">
+        <input type="tel" id="phoneNumber" placeholder="הקלד מספר טלפון" autocomplete="off">
+    </div>
+
+    <div class="keypad">
+        <button onclick="addDigit('1')">1</button>
+        <button onclick="addDigit('2')">2</button>
+        <button onclick="addDigit('3')">3</button>
+        <button onclick="addDigit('4')">4</button>
+        <button onclick="addDigit('5')">5</button>
+        <button onclick="addDigit('6')">6</button>
+        <button onclick="addDigit('7')">7</button>
+        <button onclick="addDigit('8')">8</button>
+        <button onclick="addDigit('9')">9</button>
+        <button onclick="addDigit('*')">*</button>
+        <button onclick="addDigit('0')">0</button>
+        <button onclick="addDigit('#')">#</button>
+    </div>
+
+    <button class="btn-dial" onclick="dialNumber()">📞 חייג</button>
+
+    <div class="status" id="status"></div>
+</div>
+
+<script>
+var phoneInput = document.getElementById('phoneNumber');
+var statusEl = document.getElementById('status');
+
+function addDigit(d) {
+    phoneInput.value += d;
+    phoneInput.focus();
+}
+
+phoneInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') dialNumber();
+});
+
+function dialNumber() {
+    var number = phoneInput.value.replace(/[^0-9*#+]/g, '');
+    if (!number) {
+        statusEl.textContent = 'הקלד מספר טלפון';
+        return;
+    }
+
+    statusEl.textContent = 'פותח חייגן...';
+
+    // Open the SIP Phone app with the number via custom protocol
+    window.location.href = 'sipphone://' + number;
+
+    setTimeout(function() {
+        statusEl.textContent = 'אם התוכנה לא נפתחה, ודא שהתקנת את הפרוטוקול (install_protocol.bat)';
+    }, 3000);
+}
+</script>
+</body>
+</html>
