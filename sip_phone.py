@@ -152,7 +152,8 @@ class SIPPhoneApp:
         self.is_calling = False
 
         self.build_ui()
-        self.connect_sip()
+        # Defer SIP connection to after UI is fully ready
+        self.root.after(1000, self.connect_sip)
 
     def log(self, msg):
         logging.info(msg)
@@ -479,11 +480,23 @@ class SIPPhoneApp:
 
 
 if __name__ == "__main__":
+    # Redirect stderr to log file to capture native crashes
+    err_log = os.path.join(LOG_DIR, "sip_stderr.log")
+    try:
+        sys.stderr = open(err_log, 'w')
+    except:
+        pass
+
+    print(f"SIP Phone starting...")
+    print(f"Log dir: {LOG_DIR}")
+    print(f"App dir: {APP_DIR}")
+
     try:
         app = SIPPhoneApp()
         app.run()
     except Exception as e:
         err_msg = f"Fatal error:\n{e}\n\n{traceback.format_exc()}"
+        print(err_msg)
         logging.error(err_msg)
         try:
             root = tk.Tk()
@@ -491,6 +504,6 @@ if __name__ == "__main__":
             messagebox.showerror("SIP Phone Error", err_msg)
             root.destroy()
         except:
-            print(err_msg)
+            pass
         input("Press Enter to close...")
         sys.exit(1)
