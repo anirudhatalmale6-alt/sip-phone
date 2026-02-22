@@ -12,7 +12,7 @@ import time
 import logging
 import traceback
 
-# Settings & log file paths - use CWD for settings, temp for logs
+# Settings & log file paths
 APP_DIR = os.getcwd()
 SETTINGS_FILE = os.path.join(APP_DIR, "sip_settings.json")
 import tempfile
@@ -22,19 +22,8 @@ LOG_FILE = os.path.join(LOG_DIR, "sip_debug.log")
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
 
-try:
-    import pjsua2 as pj
-except Exception as e:
-    err_msg = f"Failed to load pjsua2:\n{e}\n\n{traceback.format_exc()}"
-    logging.error(err_msg)
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("SIP Phone Error", err_msg)
-        root.destroy()
-    except:
-        print(err_msg)
-    sys.exit(1)
+# Lazy import - don't import pjsua2 at module level
+pj = None
 
 DEFAULT_SETTINGS = {
     "server": "172.104.203.87",
@@ -57,98 +46,11 @@ def save_settings(settings):
         json.dump(settings, f, indent=2)
 
 
-class MyCall(pj.Call):
-    """Custom call class with state callbacks."""
-    def __init__(self, acc, app, call_id=pj.PJSUA_INVALID_ID):
-        pj.Call.__init__(self, acc, call_id)
-        self.app = app
-
-    def onCallState(self, prm):
-        try:
-            ci = self.getInfo()
-            state_text = ci.stateText
-            self.app.log(f"Call state: {state_text} (code {ci.lastStatusCode})")
-
-            if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
-                self.app.safe_ui(lambda: self.app.call_status_var.set("Connected"))
-                self.app.safe_ui(lambda: self.app.status_label.config(fg="#4CAF50"))
-            elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
-                self.app.log(f"Call disconnected: {ci.lastReason}")
-                self.app.safe_ui(self.app._call_ended)
-            elif ci.state == pj.PJSIP_INV_STATE_CALLING:
-                self.app.safe_ui(lambda: self.app.call_status_var.set("Calling..."))
-            elif ci.state == pj.PJSIP_INV_STATE_EARLY:
-                self.app.safe_ui(lambda: self.app.call_status_var.set("Ringing..."))
-            elif ci.state == pj.PJSIP_INV_STATE_CONNECTING:
-                self.app.safe_ui(lambda: self.app.call_status_var.set("Connecting..."))
-        except Exception as e:
-            self.app.log(f"onCallState error: {e}")
-
-    def onCallMediaState(self, prm):
-        ci = self.getInfo()
-        for mi_idx in range(len(ci.media)):
-            mi = ci.media[mi_idx]
-            if mi.type == pj.PJMEDIA_TYPE_AUDIO and \
-               (mi.status == pj.PJSUA_CALL_MEDIA_ACTIVE or
-                mi.status == pj.PJSUA_CALL_MEDIA_REMOTE_HOLD):
-                try:
-                    m = self.getMedia(mi_idx)
-                    am = pj.AudioMedia.typecastFromMedia(m)
-                    # Connect call audio to sound device
-                    mgr = pj.Endpoint.instance().audDevManager()
-                    mgr.getCaptureDevMedia().startTransmit(am)
-                    am.startTransmit(mgr.getPlaybackDevMedia())
-                    self.app.log("Audio connected")
-                except Exception as e:
-                    self.app.log(f"Audio error: {e}")
-
-
-class MyAccount(pj.Account):
-    """Custom account class with registration callback."""
-    def __init__(self, app):
-        pj.Account.__init__(self)
-        self.app = app
-
-    def onRegState(self, prm):
-        try:
-            self.app.log(f"Registration: {prm.code} {prm.reason}")
-            if prm.code == 200:
-                self.app.is_registered = True
-                self.app.safe_ui(lambda: self.app.status_var.set(
-                    f"Registered: {self.app.settings['username']}"))
-                self.app.safe_ui(lambda: self.app.indicator.itemconfig(
-                    self.app.indicator_dot, fill="#4CAF50"))
-            else:
-                self.app.is_registered = False
-                self.app.safe_ui(lambda: self.app.status_var.set(
-                    f"Reg failed: {prm.code} {prm.reason}"))
-                self.app.safe_ui(lambda: self.app.indicator.itemconfig(
-                    self.app.indicator_dot, fill="#ff4444"))
-        except Exception as e:
-            self.app.log(f"onRegState error: {e}")
-
-    def onIncomingCall(self, prm):
-        try:
-            call = MyCall(self, self.app, prm.callId)
-            ci = call.getInfo()
-            self.app.log(f"Incoming call from {ci.remoteUri}")
-            call_prm = pj.CallOpParam()
-            call_prm.statusCode = 200
-            call.answer(call_prm)
-            self.app.current_call = call
-            self.app.is_calling = True
-            self.app.safe_ui(lambda: self.app.call_status_var.set("Incoming call"))
-            self.app.safe_ui(lambda: self.app.btn_hangup.config(state="normal"))
-            self.app.safe_ui(lambda: self.app.btn_call.config(state="disabled"))
-        except Exception as e:
-            self.app.log(f"onIncomingCall error: {e}")
-
-
 class SIPPhoneApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("SIP Phone")
-        self.root.geometry("320x560")
+        self.root.geometry("320x580")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a2e")
 
@@ -158,13 +60,12 @@ class SIPPhoneApp:
         self.current_call = None
         self.is_registered = False
         self.is_calling = False
+        self.pj_loaded = False
         self.ui_queue = queue.Queue()
 
         self.build_ui()
-        # Process UI updates from background threads
         self._poll_ui_queue()
-        # Defer SIP connection to after UI is fully ready
-        self.root.after(2000, self.connect_sip)
+        self.log("UI ready. Click Connect to start.")
 
     def safe_ui(self, func):
         """Thread-safe way to run a function on the UI thread."""
@@ -173,7 +74,7 @@ class SIPPhoneApp:
     def _poll_ui_queue(self):
         """Process pending UI updates from background threads."""
         try:
-            while True:
+            for _ in range(20):  # Process max 20 items per tick
                 func = self.ui_queue.get_nowait()
                 try:
                     func()
@@ -185,8 +86,9 @@ class SIPPhoneApp:
 
     def log(self, msg):
         logging.info(msg)
+        print(msg)
         try:
-            self.safe_ui(lambda: self._update_log(msg))
+            self.safe_ui(lambda m=msg: self._update_log(m))
         except:
             pass
 
@@ -205,10 +107,10 @@ class SIPPhoneApp:
                  fg="#e94560", bg="#1a1a2e").pack(pady=(10, 3))
 
         # Status
-        self.status_var = tk.StringVar(value="Connecting...")
+        self.status_var = tk.StringVar(value="Not connected")
         self.status_label = tk.Label(self.root, textvariable=self.status_var,
                                       font=("Segoe UI", 10), fg="#999999", bg="#1a1a2e")
-        self.status_label.pack(pady=(0, 5))
+        self.status_label.pack(pady=(0, 3))
 
         # Status indicator
         self.indicator = tk.Canvas(self.root, width=12, height=12, bg="#1a1a2e",
@@ -216,9 +118,15 @@ class SIPPhoneApp:
         self.indicator.pack()
         self.indicator_dot = self.indicator.create_oval(2, 2, 10, 10, fill="#ff4444", outline="")
 
+        # Connect button
+        self.btn_connect = tk.Button(self.root, text="Connect", font=("Segoe UI", 10, "bold"),
+                                      bg="#0f3460", fg="white", activebackground="#16213e",
+                                      relief="flat", command=self.on_connect_click)
+        self.btn_connect.pack(pady=(5, 5))
+
         # Phone number display
         frame_num = tk.Frame(self.root, bg="#16213e", padx=10, pady=8)
-        frame_num.pack(padx=20, pady=(10, 5), fill="x")
+        frame_num.pack(padx=20, pady=(5, 5), fill="x")
 
         self.number_var = tk.StringVar()
         self.number_entry = tk.Entry(frame_num, textvariable=self.number_var,
@@ -230,7 +138,7 @@ class SIPPhoneApp:
 
         # Keypad
         keypad_frame = tk.Frame(self.root, bg="#1a1a2e")
-        keypad_frame.pack(padx=20, pady=5)
+        keypad_frame.pack(padx=20, pady=3)
 
         keys = [
             ['1', '2', '3'],
@@ -248,7 +156,7 @@ class SIPPhoneApp:
                                 activebackground="#0f3460", activeforeground="#ffffff",
                                 relief="flat", bd=0,
                                 command=lambda k=key: self.press_key(k))
-                btn.pack(side="left", padx=3, pady=3)
+                btn.pack(side="left", padx=3, pady=2)
 
         # Call / Hangup buttons
         btn_frame = tk.Frame(self.root, bg="#1a1a2e")
@@ -280,15 +188,14 @@ class SIPPhoneApp:
         # Log area
         log_frame = tk.Frame(self.root, bg="#0d0d1a")
         log_frame.pack(padx=10, pady=(0, 5), fill="both", expand=True)
-        self.log_text = tk.Text(log_frame, height=4, bg="#0d0d1a", fg="#666666",
+        self.log_text = tk.Text(log_frame, height=5, bg="#0d0d1a", fg="#666666",
                                  font=("Consolas", 7), relief="flat", state="disabled",
                                  wrap="word")
         self.log_text.pack(fill="both", expand=True)
 
     def press_key(self, key):
         self.number_var.set(self.number_var.get() + key)
-        # Send DTMF if in call
-        if self.current_call and self.is_calling:
+        if self.current_call and self.is_calling and self.pj_loaded:
             try:
                 dtmf_prm = pj.CallSendDtmfParam()
                 dtmf_prm.digits = key
@@ -297,11 +204,22 @@ class SIPPhoneApp:
             except:
                 pass
 
-    def connect_sip(self):
+    def on_connect_click(self):
+        self.btn_connect.config(state="disabled", text="Connecting...")
+        self.status_var.set("Loading SIP engine...")
+        self.indicator.itemconfig(self.indicator_dot, fill="#ffaa00")
         threading.Thread(target=self._connect_sip_thread, daemon=True).start()
 
     def _connect_sip_thread(self):
+        global pj
         try:
+            # Step 1: Import pjsua2
+            self.log("Loading pjsua2...")
+            import pjsua2
+            pj = pjsua2
+            self.pj_loaded = True
+            self.log("pjsua2 loaded OK")
+
             server = self.settings["server"]
             port = int(self.settings["port"])
             username = self.settings["username"]
@@ -309,58 +227,148 @@ class SIPPhoneApp:
 
             self.safe_ui(lambda: self.status_var.set("Initializing..."))
 
-            # Create endpoint
+            # Step 2: Create endpoint
+            self.log("Creating endpoint...")
             self.ep = pj.Endpoint()
             self.ep.libCreate()
 
-            # Endpoint config
+            # Endpoint config - no console logging
             ep_cfg = pj.EpConfig()
-            ep_cfg.logConfig.level = 4
-            ep_cfg.logConfig.consoleLevel = 0  # Disable console logging to prevent tkinter conflicts
+            ep_cfg.logConfig.level = 3
+            ep_cfg.logConfig.consoleLevel = 0
             log_path = os.path.join(LOG_DIR, "sip_pjsip.log")
             ep_cfg.logConfig.filename = log_path
-            self.log(f"PJSIP log: {log_path}")
-
-            # UA config
             ep_cfg.uaConfig.maxCalls = 4
+            # Use fewer threads to reduce crash risk
+            ep_cfg.uaConfig.threadCnt = 0
 
+            self.log("Initializing PJSIP...")
             self.ep.libInit(ep_cfg)
 
-            # Create UDP transport
+            # Step 3: Create UDP transport
+            self.log("Creating UDP transport...")
             tp_cfg = pj.TransportConfig()
-            tp_cfg.port = 0  # auto-select
+            tp_cfg.port = 0
             self.ep.transportCreate(pj.PJSIP_TRANSPORT_UDP, tp_cfg)
 
+            self.log("Starting PJSIP...")
             self.ep.libStart()
-            self.log(f"PJSIP started, connecting to {server}:{port}")
+
+            # Handle events manually since threadCnt=0
+            self.log("PJSIP started OK")
             self.safe_ui(lambda: self.status_var.set("Registering..."))
 
-            # Account config
+            # Step 4: Create account
+            self.log(f"Registering {username}@{server}:{port}...")
+
+            # Define callback classes with pj reference
+            class CallHandler(pj.Call):
+                def __init__(ch_self, acc, app, call_id=pj.PJSUA_INVALID_ID):
+                    pj.Call.__init__(ch_self, acc, call_id)
+                    ch_self.app = app
+
+                def onCallState(ch_self, prm):
+                    try:
+                        ci = ch_self.getInfo()
+                        ch_self.app.log(f"Call: {ci.stateText} ({ci.lastStatusCode})")
+                        if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
+                            ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Connected"))
+                        elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
+                            ch_self.app.safe_ui(ch_self.app._call_ended)
+                        elif ci.state == pj.PJSIP_INV_STATE_CALLING:
+                            ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Calling..."))
+                        elif ci.state == pj.PJSIP_INV_STATE_EARLY:
+                            ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Ringing..."))
+                    except Exception as e:
+                        ch_self.app.log(f"onCallState err: {e}")
+
+                def onCallMediaState(ch_self, prm):
+                    try:
+                        ci = ch_self.getInfo()
+                        for i in range(len(ci.media)):
+                            if ci.media[i].type == pj.PJMEDIA_TYPE_AUDIO and \
+                               ci.media[i].status == pj.PJSUA_CALL_MEDIA_ACTIVE:
+                                m = ch_self.getMedia(i)
+                                am = pj.AudioMedia.typecastFromMedia(m)
+                                mgr = pj.Endpoint.instance().audDevManager()
+                                mgr.getCaptureDevMedia().startTransmit(am)
+                                am.startTransmit(mgr.getPlaybackDevMedia())
+                                ch_self.app.log("Audio connected")
+                    except Exception as e:
+                        ch_self.app.log(f"Audio err: {e}")
+
+            class AccHandler(pj.Account):
+                def __init__(ah_self, app):
+                    pj.Account.__init__(ah_self)
+                    ah_self.app = app
+
+                def onRegState(ah_self, prm):
+                    try:
+                        ah_self.app.log(f"Reg: {prm.code} {prm.reason}")
+                        if prm.code == 200:
+                            ah_self.app.is_registered = True
+                            ah_self.app.safe_ui(lambda: ah_self.app.status_var.set(
+                                f"Registered: {ah_self.app.settings['username']}"))
+                            ah_self.app.safe_ui(lambda: ah_self.app.indicator.itemconfig(
+                                ah_self.app.indicator_dot, fill="#4CAF50"))
+                            ah_self.app.safe_ui(lambda: ah_self.app.btn_connect.config(
+                                text="Connected", state="disabled"))
+                        elif prm.code >= 300:
+                            ah_self.app.safe_ui(lambda: ah_self.app.status_var.set(
+                                f"Reg failed: {prm.code}"))
+                            ah_self.app.safe_ui(lambda: ah_self.app.indicator.itemconfig(
+                                ah_self.app.indicator_dot, fill="#ff4444"))
+                    except Exception as e:
+                        ah_self.app.log(f"onRegState err: {e}")
+
+                def onIncomingCall(ah_self, prm):
+                    try:
+                        call = CallHandler(ah_self, ah_self.app, prm.callId)
+                        cp = pj.CallOpParam()
+                        cp.statusCode = 200
+                        call.answer(cp)
+                        ah_self.app.current_call = call
+                        ah_self.app.is_calling = True
+                        ah_self.app.safe_ui(lambda: ah_self.app.call_status_var.set("Incoming call"))
+                        ah_self.app.safe_ui(lambda: ah_self.app.btn_hangup.config(state="normal"))
+                        ah_self.app.safe_ui(lambda: ah_self.app.btn_call.config(state="disabled"))
+                    except Exception as e:
+                        ah_self.app.log(f"Incoming err: {e}")
+
+            # Store the classes for later use
+            self.CallHandler = CallHandler
+
             acfg = pj.AccountConfig()
             acfg.idUri = f"sip:{username}@{server}"
             acfg.regConfig.registrarUri = f"sip:{server}:{port}"
             acfg.regConfig.timeoutSec = 300
 
-            # Auth credentials
             cred = pj.AuthCredInfo("digest", "*", username, 0, password)
             acfg.sipConfig.authCreds.append(cred)
 
-            # NAT config - helps behind routers
-            acfg.natConfig.iceEnabled = True
+            # NAT - disable ICE to avoid potential crashes
+            acfg.natConfig.iceEnabled = False
             acfg.natConfig.sdpNatRewriteUse = 1
-            acfg.natConfig.sipOutboundUse = 1
 
-            # Create and register account
-            self.acc = MyAccount(self)
+            self.acc = AccHandler(self)
             self.acc.create(acfg)
 
             self.log("Account created, waiting for registration...")
 
+            # Since threadCnt=0, we need to poll for events
+            while True:
+                try:
+                    self.ep.libHandleEvents(100)
+                except:
+                    pass
+                time.sleep(0.05)
+
         except Exception as e:
             err = str(e)
-            self.log(f"SIP init error: {err}")
+            self.log(f"SIP error: {err}\n{traceback.format_exc()}")
             self.safe_ui(lambda: self.status_var.set(f"Error: {err[:50]}"))
             self.safe_ui(lambda: self.indicator.itemconfig(self.indicator_dot, fill="#ff4444"))
+            self.safe_ui(lambda: self.btn_connect.config(state="normal", text="Retry"))
 
     def dial(self):
         number = self.number_var.get().strip()
@@ -368,7 +376,7 @@ class SIPPhoneApp:
             return
 
         if not self.is_registered or not self.acc:
-            messagebox.showerror("Error", "SIP not registered. Check settings.")
+            messagebox.showerror("Error", "Not registered. Click Connect first.")
             return
 
         if self.current_call:
@@ -380,26 +388,21 @@ class SIPPhoneApp:
         self.call_status_var.set(f"Calling {number}...")
         self.log(f"Dialing: {number}")
 
-        threading.Thread(target=self._dial_thread, args=(number,), daemon=True).start()
-
-    def _dial_thread(self, number):
         try:
             server = self.settings["server"]
-            call = MyCall(self.acc, self)
+            call = self.CallHandler(self.acc, self)
             call_prm = pj.CallOpParam(True)
-
             dest_uri = f"sip:{number}@{server}"
-            self.log(f"Calling URI: {dest_uri}")
+            self.log(f"URI: {dest_uri}")
             call.makeCall(dest_uri, call_prm)
             self.current_call = call
             self.is_calling = True
-            self.log("Call initiated via PJSUA2")
-
+            self.log("Call initiated")
         except Exception as e:
             err = str(e)
             self.log(f"Call error: {err}")
-            self.safe_ui(lambda: self.call_status_var.set(f"Error: {err[:40]}"))
-            self.safe_ui(self._call_ended)
+            self.call_status_var.set(f"Error: {err[:40]}")
+            self._call_ended()
 
     def hangup(self):
         self.log("Hangup pressed")
@@ -448,38 +451,10 @@ class SIPPhoneApp:
             self.settings["username"] = fields["username"].get()
             self.settings["password"] = fields["password"].get()
             save_settings(self.settings)
-
-            # Cleanup old connection
-            if self.current_call:
-                try:
-                    prm = pj.CallOpParam()
-                    self.current_call.hangup(prm)
-                except:
-                    pass
-                self.current_call = None
-
-            if self.acc:
-                try:
-                    self.acc.shutdown()
-                except:
-                    pass
-                self.acc = None
-
-            if self.ep:
-                try:
-                    self.ep.libDestroy()
-                except:
-                    pass
-                self.ep = None
-
-            self.is_registered = False
-            self.is_calling = False
-            self.status_var.set("Reconnecting...")
-            self.indicator.itemconfig(self.indicator_dot, fill="#ffaa00")
             win.destroy()
-            self.connect_sip()
+            messagebox.showinfo("Saved", "Settings saved. Click Connect to reconnect.")
 
-        tk.Button(win, text="Save & Reconnect", font=("Segoe UI", 11, "bold"),
+        tk.Button(win, text="Save", font=("Segoe UI", 11, "bold"),
                   bg="#4CAF50", fg="white", relief="flat",
                   command=do_save).place(x=20, y=240, width=260, height=32)
 
@@ -505,10 +480,10 @@ class SIPPhoneApp:
             except:
                 pass
         self.root.destroy()
+        os._exit(0)
 
 
 if __name__ == "__main__":
-    # Redirect stderr to log file to capture native crashes
     err_log = os.path.join(LOG_DIR, "sip_stderr.log")
     try:
         sys.stderr = open(err_log, 'w')
