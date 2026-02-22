@@ -43,7 +43,7 @@ jobs:
             $binaries += " --add-binary `"$($_.FullName);.`""
           }
 
-          $cmd = "pyinstaller --onedir --console --name `"SIP-Phone`" --icon NONE --hidden-import pjsua2 $binaries sip_phone.py"
+          $cmd = "pyinstaller --onedir --noconsole --name `"SIP-Phone`" --icon NONE --hidden-import pjsua2 $binaries sip_phone.py"
           echo "Running: $cmd"
           Invoke-Expression $cmd
 

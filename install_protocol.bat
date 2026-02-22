@@ -10,7 +10,7 @@ echo.
 
 reg add "HKEY_CLASSES_ROOT\sipphone" /ve /d "URL:SIP Phone Protocol" /f
 reg add "HKEY_CLASSES_ROOT\sipphone" /v "URL Protocol" /d "" /f
-reg add "HKEY_CLASSES_ROOT\sipphone\shell\open\command" /ve /d "\"%EXEPATH%\" \"%%1\"" /f
+reg add "HKEY_CLASSES_ROOT\sipphone\shell\open\command" /ve /d "\"%EXEPATH%\" \"%%1\" --hidden" /f
 
 echo.
 echo Done! sipphone:// links will now open SIP-Phone.

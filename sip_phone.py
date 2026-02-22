@@ -61,6 +61,7 @@ class SIPPhoneApp:
         self.is_registered = False
         self.is_calling = False
         self.pj_loaded = False
+        self.hidden_mode = False
         self.ui_queue = queue.Queue()
         self.sip_queue = queue.Queue()  # Commands for the SIP thread
         self.auto_dial_number = None
@@ -68,6 +69,10 @@ class SIPPhoneApp:
 
         # Check for phone number in command line args
         self._parse_args()
+
+        # Hidden mode - withdraw window so it's completely invisible
+        if self.hidden_mode:
+            self.root.withdraw()
 
         self.build_ui()
         self._poll_ui_queue()
@@ -81,13 +86,21 @@ class SIPPhoneApp:
             self.log("UI ready. Click Connect to start.")
 
     def _parse_args(self):
-        """Parse command line for phone number. Supports:
+        """Parse command line for phone number and flags. Supports:
         - SIP-Phone.exe 0501234567
         - SIP-Phone.exe sipphone://0501234567
         - SIP-Phone.exe sipphone:0501234567
+        - SIP-Phone.exe --hidden 0501234567
+        - SIP-Phone.exe sipphone://0501234567 --hidden
         """
-        if len(sys.argv) > 1:
-            arg = sys.argv[1].strip()
+        args = sys.argv[1:]
+        # Check for --hidden flag
+        if "--hidden" in args:
+            self.hidden_mode = True
+            args = [a for a in args if a != "--hidden"]
+
+        for arg in args:
+            arg = arg.strip()
             # Strip protocol prefix if present
             for prefix in ["sipphone://", "sipphone:", "tel://", "tel:"]:
                 if arg.lower().startswith(prefix):
@@ -99,6 +112,7 @@ class SIPPhoneApp:
             cleaned = ''.join(c for c in arg if c in '0123456789*#+')
             if cleaned:
                 self.auto_dial_number = cleaned
+                break
 
     def safe_ui(self, func):
         """Thread-safe way to run a function on the UI thread."""
@@ -473,6 +487,10 @@ class SIPPhoneApp:
         self.call_status_var.set("")
         self.btn_call.config(state="normal")
         self.btn_hangup.config(state="disabled")
+        # In hidden mode, close the app when the call ends
+        if self.hidden_mode and self.auto_dial_done:
+            self.log("Hidden mode: call ended, closing app")
+            self.on_close()
 
     def show_settings(self):
         win = tk.Toplevel(self.root)
