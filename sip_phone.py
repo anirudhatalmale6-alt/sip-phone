@@ -11,10 +11,12 @@ import time
 import logging
 import traceback
 
-# Settings file path
-APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+# Settings & log file paths - use CWD for settings, temp for logs
+APP_DIR = os.getcwd()
 SETTINGS_FILE = os.path.join(APP_DIR, "sip_settings.json")
-LOG_FILE = os.path.join(APP_DIR, "sip_debug.log")
+import tempfile
+LOG_DIR = tempfile.gettempdir()
+LOG_FILE = os.path.join(LOG_DIR, "sip_debug.log")
 
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
@@ -286,8 +288,9 @@ class SIPPhoneApp:
             ep_cfg = pj.EpConfig()
             ep_cfg.logConfig.level = 4
             ep_cfg.logConfig.consoleLevel = 4
-            log_path = LOG_FILE.replace(".log", "_pjsip.log")
+            log_path = os.path.join(LOG_DIR, "sip_pjsip.log")
             ep_cfg.logConfig.filename = log_path
+            self.log(f"PJSIP log: {log_path}")
 
             # UA config
             ep_cfg.uaConfig.maxCalls = 4
