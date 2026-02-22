@@ -67,8 +67,13 @@ input[type="tel"]::placeholder {
 .keypad button:hover {
     background: #1a4a8a;
 }
+.buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 5px;
+}
 .btn-dial {
-    width: 100%;
+    flex: 1;
     background: #4CAF50;
     color: #fff;
     border: none;
@@ -82,9 +87,20 @@ input[type="tel"]::placeholder {
 .btn-dial:hover {
     background: #388E3C;
 }
-.btn-dial:disabled {
-    background: #555;
-    cursor: not-allowed;
+.btn-hangup {
+    flex: 1;
+    background: #e94560;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    padding: 15px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-hangup:hover {
+    background: #c62828;
 }
 .status {
     margin-top: 12px;
@@ -95,7 +111,7 @@ input[type="tel"]::placeholder {
 </head>
 <body>
 <div class="dialer">
-    <h1>חייג טלפון</h1>
+    <h1>חייגן טלפון</h1>
 
     <div class="input-wrap">
         <input type="tel" id="phoneNumber" placeholder="הקלד מספר טלפון" autocomplete="off">
@@ -116,7 +132,10 @@ input[type="tel"]::placeholder {
         <button onclick="addDigit('#')">#</button>
     </div>
 
-    <button class="btn-dial" onclick="dialNumber()">📞 חייג</button>
+    <div class="buttons">
+        <button class="btn-dial" onclick="dialNumber()">📞 חייג</button>
+        <button class="btn-hangup" onclick="hangupCall()">📕 נתק</button>
+    </div>
 
     <div class="status" id="status"></div>
 </div>
@@ -141,14 +160,21 @@ function dialNumber() {
         return;
     }
 
-    statusEl.textContent = 'פותח חייגן...';
-
-    // Open the SIP Phone app with the number via custom protocol
+    statusEl.textContent = 'מחייג...';
     window.location.href = 'sipphone://' + number;
 
     setTimeout(function() {
         statusEl.textContent = 'אם התוכנה לא נפתחה, ודא שהתקנת את הפרוטוקול (install_protocol.bat)';
     }, 3000);
+}
+
+function hangupCall() {
+    statusEl.textContent = 'מנתק שיחה...';
+    window.location.href = 'sipphone://hangup';
+
+    setTimeout(function() {
+        statusEl.textContent = 'השיחה נותקה';
+    }, 1500);
 }
 </script>
 </body>

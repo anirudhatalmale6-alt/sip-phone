@@ -67,6 +67,8 @@ class SIPPhoneApp:
         self.sip_queue = queue.Queue()  # Commands for the SIP thread
         self.auto_dial_number = None
         self.auto_dial_done = False
+        self.call_start_time = None
+        self.call_timeout = 120  # Auto-hangup after 120 seconds in hidden mode
 
         # Check for phone number in command line args
         self._parse_args()
@@ -330,8 +332,10 @@ class SIPPhoneApp:
                         ci = ch_self.getInfo()
                         ch_self.app.log(f"Call: {ci.stateText} ({ci.lastStatusCode})")
                         if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
+                            ch_self.app.call_start_time = time.time()
                             ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Connected"))
                         elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
+                            ch_self.app.call_start_time = None
                             ch_self.app.safe_ui(ch_self.app._call_ended)
                         elif ci.state == pj.PJSIP_INV_STATE_CALLING:
                             ch_self.app.safe_ui(lambda: ch_self.app.call_status_var.set("Calling..."))
@@ -451,6 +455,18 @@ class SIPPhoneApp:
                         except Exception as e:
                             self.log(f"Signal hangup error: {e}")
                     self.safe_ui(self._call_ended)
+                # Auto-timeout in hidden mode
+                if self.hidden_mode and self.call_start_time and self.current_call:
+                    elapsed = time.time() - self.call_start_time
+                    if elapsed >= self.call_timeout:
+                        self.log(f"Auto-timeout: call exceeded {self.call_timeout}s")
+                        try:
+                            prm = pj.CallOpParam()
+                            self.current_call.hangup(prm)
+                        except Exception as e:
+                            self.log(f"Timeout hangup error: {e}")
+                        self.call_start_time = None
+                        self.safe_ui(self._call_ended)
                 time.sleep(0.02)
 
         except Exception as e:
@@ -513,6 +529,7 @@ class SIPPhoneApp:
     def _call_ended(self):
         self.current_call = None
         self.is_calling = False
+        self.call_start_time = None
         self.call_status_var.set("")
         self.btn_call.config(state="normal")
         self.btn_hangup.config(state="disabled")
