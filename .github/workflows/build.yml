@@ -20,11 +20,32 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyVoIP==1.6.8 pyinstaller==6.11.1
+          pip install pjsua2-wheel==2.15.3 pyinstaller==6.11.1
+
+      - name: Find pjsua2 files
+        shell: powershell
+        run: |
+          $pjPath = python -c "import pjsua2; import os; print(os.path.dirname(pjsua2.__file__))"
+          echo "PJSUA2_PATH=$pjPath" >> $env:GITHUB_ENV
+          echo "pjsua2 found at: $pjPath"
+          Get-ChildItem $pjPath -Recurse | ForEach-Object { echo $_.FullName }
 
       - name: Build EXE
+        shell: powershell
         run: |
-          pyinstaller --onefile --windowed --name "SIP-Phone" --icon NONE sip_phone.py
+          $pjPath = "${{ env.PJSUA2_PATH }}"
+          # Collect all DLL and PYD files from pjsua2 package
+          $binaries = ""
+          Get-ChildItem $pjPath -Filter "*.dll" | ForEach-Object {
+            $binaries += " --add-binary `"$($_.FullName);.`""
+          }
+          Get-ChildItem $pjPath -Filter "*.pyd" | ForEach-Object {
+            $binaries += " --add-binary `"$($_.FullName);.`""
+          }
+
+          $cmd = "pyinstaller --onefile --windowed --name `"SIP-Phone`" --icon NONE --hidden-import pjsua2 $binaries sip_phone.py"
+          echo "Running: $cmd"
+          Invoke-Expression $cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

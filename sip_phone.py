@@ -1,5 +1,5 @@
 """
-SIP Phone - Simple Windows SIP Dialer
+SIP Phone - Simple Windows SIP Dialer (PJSUA2)
 """
 import tkinter as tk
 from tkinter import messagebox
@@ -7,23 +7,18 @@ import threading
 import json
 import os
 import sys
-import socket
 import time
 import logging
 
-# Enable pyVoIP debug
-try:
-    import pyVoIP
-    pyVoIP.DEBUG = True
-except:
-    pass
-
 # Settings file path
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "sip_settings.json")
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "sip_debug.log")
+APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+SETTINGS_FILE = os.path.join(APP_DIR, "sip_settings.json")
+LOG_FILE = os.path.join(APP_DIR, "sip_debug.log")
 
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
+
+import pjsua2 as pj
 
 DEFAULT_SETTINGS = {
     "server": "172.104.203.87",
@@ -45,22 +40,85 @@ def save_settings(settings):
     with open(SETTINGS_FILE, 'w') as f:
         json.dump(settings, f, indent=2)
 
-def get_local_ip(server="172.104.203.87", port=5060):
-    """Get the local IP address that has a route to the SIP server."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect((server, port))
-        ip = s.getsockname()[0]
-        s.close()
-        logging.info(f"Detected local IP: {ip}")
-        return ip
-    except Exception as e:
-        logging.error(f"Failed to detect local IP: {e}")
-        # Fallback
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except:
-            return "0.0.0.0"
+
+class MyCall(pj.Call):
+    """Custom call class with state callbacks."""
+    def __init__(self, acc, app, call_id=pj.PJSUA_INVALID_ID):
+        pj.Call.__init__(self, acc, call_id)
+        self.app = app
+
+    def onCallState(self, prm):
+        ci = self.getInfo()
+        state_text = ci.stateText
+        self.app.log(f"Call state: {state_text} (code {ci.lastStatusCode})")
+
+        if ci.state == pj.PJSIP_INV_STATE_CONFIRMED:
+            self.app.root.after(0, lambda: self.app.call_status_var.set("Connected"))
+            self.app.root.after(0, lambda: self.app.status_label.config(fg="#4CAF50"))
+        elif ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
+            self.app.log(f"Call disconnected: {ci.lastReason}")
+            self.app.root.after(0, self.app._call_ended)
+        elif ci.state == pj.PJSIP_INV_STATE_CALLING:
+            self.app.root.after(0, lambda: self.app.call_status_var.set("Calling..."))
+        elif ci.state == pj.PJSIP_INV_STATE_EARLY:
+            self.app.root.after(0, lambda: self.app.call_status_var.set("Ringing..."))
+        elif ci.state == pj.PJSIP_INV_STATE_CONNECTING:
+            self.app.root.after(0, lambda: self.app.call_status_var.set("Connecting..."))
+
+    def onCallMediaState(self, prm):
+        ci = self.getInfo()
+        for mi_idx in range(len(ci.media)):
+            mi = ci.media[mi_idx]
+            if mi.type == pj.PJMEDIA_TYPE_AUDIO and \
+               (mi.status == pj.PJSUA_CALL_MEDIA_ACTIVE or
+                mi.status == pj.PJSUA_CALL_MEDIA_REMOTE_HOLD):
+                try:
+                    m = self.getMedia(mi_idx)
+                    am = pj.AudioMedia.typecastFromMedia(m)
+                    # Connect call audio to sound device
+                    mgr = pj.Endpoint.instance().audDevManager()
+                    mgr.getCaptureDevMedia().startTransmit(am)
+                    am.startTransmit(mgr.getPlaybackDevMedia())
+                    self.app.log("Audio connected")
+                except Exception as e:
+                    self.app.log(f"Audio error: {e}")
+
+
+class MyAccount(pj.Account):
+    """Custom account class with registration callback."""
+    def __init__(self, app):
+        pj.Account.__init__(self)
+        self.app = app
+
+    def onRegState(self, prm):
+        ai = self.getInfo()
+        self.app.log(f"Registration: {prm.code} {prm.reason}")
+        if prm.code == 200:
+            self.app.is_registered = True
+            self.app.root.after(0, lambda: self.app.status_var.set(
+                f"Registered: {self.app.settings['username']}"))
+            self.app.root.after(0, lambda: self.app.indicator.itemconfig(
+                self.app.indicator_dot, fill="#4CAF50"))
+        else:
+            self.app.is_registered = False
+            self.app.root.after(0, lambda: self.app.status_var.set(
+                f"Reg failed: {prm.code} {prm.reason}"))
+            self.app.root.after(0, lambda: self.app.indicator.itemconfig(
+                self.app.indicator_dot, fill="#ff4444"))
+
+    def onIncomingCall(self, prm):
+        call = MyCall(self, self.app, prm.callId)
+        ci = call.getInfo()
+        self.app.log(f"Incoming call from {ci.remoteUri}")
+        # Auto-answer incoming calls
+        call_prm = pj.CallOpParam()
+        call_prm.statusCode = 200
+        call.answer(call_prm)
+        self.app.current_call = call
+        self.app.is_calling = True
+        self.app.root.after(0, lambda: self.app.call_status_var.set("Incoming call"))
+        self.app.root.after(0, lambda: self.app.btn_hangup.config(state="normal"))
+        self.app.root.after(0, lambda: self.app.btn_call.config(state="disabled"))
 
 
 class SIPPhoneApp:
@@ -72,11 +130,11 @@ class SIPPhoneApp:
         self.root.configure(bg="#1a1a2e")
 
         self.settings = load_settings()
-        self.phone = None
+        self.ep = None
+        self.acc = None
         self.current_call = None
         self.is_registered = False
         self.is_calling = False
-        self.my_ip = None
 
         self.build_ui()
         self.connect_sip()
@@ -188,7 +246,10 @@ class SIPPhoneApp:
         # Send DTMF if in call
         if self.current_call and self.is_calling:
             try:
-                self.current_call.dtmf(key)
+                dtmf_prm = pj.CallSendDtmfParam()
+                dtmf_prm.digits = key
+                dtmf_prm.method = pj.PJSUA_DTMF_METHOD_RFC2833
+                self.current_call.sendDtmf(dtmf_prm)
             except:
                 pass
 
@@ -197,70 +258,76 @@ class SIPPhoneApp:
 
     def _connect_sip_thread(self):
         try:
-            from pyVoIP.VoIP import VoIPPhone, CallState
-
             server = self.settings["server"]
             port = int(self.settings["port"])
+            username = self.settings["username"]
+            password = self.settings["password"]
 
-            self.root.after(0, lambda: self.status_var.set("Detecting IP..."))
-            self.my_ip = get_local_ip(server, port)
-            self.log(f"Local IP: {self.my_ip}")
-            self.log(f"Server: {server}:{port}")
+            self.root.after(0, lambda: self.status_var.set("Initializing..."))
 
+            # Create endpoint
+            self.ep = pj.Endpoint()
+            self.ep.libCreate()
+
+            # Endpoint config
+            ep_cfg = pj.EpConfig()
+            ep_cfg.logConfig.level = 4
+            ep_cfg.logConfig.consoleLevel = 4
+            log_path = LOG_FILE.replace(".log", "_pjsip.log")
+            ep_cfg.logConfig.filename = log_path
+
+            # UA config
+            ep_cfg.uaConfig.maxCalls = 4
+
+            self.ep.libInit(ep_cfg)
+
+            # Create UDP transport
+            tp_cfg = pj.TransportConfig()
+            tp_cfg.port = 0  # auto-select
+            self.ep.transportCreate(pj.PJSIP_TRANSPORT_UDP, tp_cfg)
+
+            self.ep.libStart()
+            self.log(f"PJSIP started, connecting to {server}:{port}")
             self.root.after(0, lambda: self.status_var.set("Registering..."))
 
-            self.phone = VoIPPhone(
-                server=server,
-                port=port,
-                username=self.settings["username"],
-                password=self.settings["password"],
-                myIP=self.my_ip,
-                callCallback=self.incoming_call_callback,
-                sipPort=5080,
-                rtpPortLow=10000,
-                rtpPortHigh=20000
-            )
-            self.phone.start()
-            self.is_registered = True
+            # Account config
+            acfg = pj.AccountConfig()
+            acfg.idUri = f"sip:{username}@{server}"
+            acfg.regConfig.registrarUri = f"sip:{server}:{port}"
+            acfg.regConfig.timeoutSec = 300
 
-            self.log(f"Registered as {self.settings['username']}")
-            self.root.after(0, lambda: self.status_var.set(f"Registered: {self.settings['username']}"))
-            self.root.after(0, lambda: self.indicator.itemconfig(self.indicator_dot, fill="#4CAF50"))
+            # Auth credentials
+            cred = pj.AuthCredInfo("digest", "*", username, 0, password)
+            acfg.sipConfig.authCreds.append(cred)
+
+            # NAT config - helps behind routers
+            acfg.natConfig.iceEnabled = True
+            acfg.natConfig.sdpNatRewriteUse = 1
+            acfg.natConfig.sipOutboundUse = 1
+
+            # Create and register account
+            self.acc = MyAccount(self)
+            self.acc.create(acfg)
+
+            self.log("Account created, waiting for registration...")
 
         except Exception as e:
             err = str(e)
-            self.log(f"Registration error: {err}")
+            self.log(f"SIP init error: {err}")
             self.root.after(0, lambda: self.status_var.set(f"Error: {err[:50]}"))
             self.root.after(0, lambda: self.indicator.itemconfig(self.indicator_dot, fill="#ff4444"))
-
-    def incoming_call_callback(self, call):
-        """Handle incoming calls"""
-        from pyVoIP.VoIP import CallState
-        try:
-            self.log(f"Incoming call, state: {call.state}")
-            call.answer()
-            self.current_call = call
-            self.is_calling = True
-            self.root.after(0, lambda: self.call_status_var.set("Incoming call - connected"))
-            self.root.after(0, lambda: self.btn_hangup.config(state="normal"))
-            self.root.after(0, lambda: self.btn_call.config(state="disabled"))
-
-            while call.state == CallState.ANSWERED:
-                time.sleep(0.5)
-
-            self.log("Incoming call ended")
-            self.root.after(0, self._call_ended)
-        except Exception as e:
-            self.log(f"Incoming call error: {e}")
-            self.root.after(0, self._call_ended)
 
     def dial(self):
         number = self.number_var.get().strip()
         if not number:
             return
 
-        if not self.is_registered or not self.phone:
+        if not self.is_registered or not self.acc:
             messagebox.showerror("Error", "SIP not registered. Check settings.")
+            return
+
+        if self.current_call:
+            messagebox.showwarning("Warning", "Already in a call. Hang up first.")
             return
 
         self.btn_call.config(state="disabled")
@@ -271,41 +338,17 @@ class SIPPhoneApp:
         threading.Thread(target=self._dial_thread, args=(number,), daemon=True).start()
 
     def _dial_thread(self, number):
-        from pyVoIP.VoIP import CallState
         try:
-            self.current_call = self.phone.call(number)
+            server = self.settings["server"]
+            call = MyCall(self.acc, self)
+            call_prm = pj.CallOpParam(True)
+
+            dest_uri = f"sip:{number}@{server}"
+            self.log(f"Calling URI: {dest_uri}")
+            call.makeCall(dest_uri, call_prm)
+            self.current_call = call
             self.is_calling = True
-            self.log(f"Call initiated, state: {self.current_call.state}")
-
-            # Wait for call state to change from DIALING
-            timeout = 30
-            start = time.time()
-            while self.current_call and self.current_call.state == CallState.DIALING:
-                if time.time() - start > timeout:
-                    self.log("Call timeout - no answer after 30s")
-                    self.root.after(0, lambda: self.call_status_var.set("No answer (timeout)"))
-                    break
-                time.sleep(0.5)
-
-            if self.current_call:
-                state = self.current_call.state
-                self.log(f"Call state changed to: {state}")
-
-                if state == CallState.RINGING:
-                    self.root.after(0, lambda: self.call_status_var.set(f"Ringing {number}..."))
-                    # Wait for answer or hangup
-                    while self.current_call and self.current_call.state == CallState.RINGING:
-                        time.sleep(0.5)
-
-                if self.current_call and self.current_call.state == CallState.ANSWERED:
-                    self.log("Call answered!")
-                    self.root.after(0, lambda: self.call_status_var.set(f"In call: {number}"))
-                    # Stay in call until ended
-                    while self.current_call and self.current_call.state == CallState.ANSWERED:
-                        time.sleep(0.5)
-
-            self.log("Call ended")
-            self.root.after(0, self._call_ended)
+            self.log("Call initiated via PJSUA2")
 
         except Exception as e:
             err = str(e)
@@ -317,7 +360,8 @@ class SIPPhoneApp:
         self.log("Hangup pressed")
         if self.current_call:
             try:
-                self.current_call.hangup()
+                prm = pj.CallOpParam()
+                self.current_call.hangup(prm)
             except Exception as e:
                 self.log(f"Hangup error: {e}")
         self._call_ended()
@@ -360,12 +404,31 @@ class SIPPhoneApp:
             self.settings["password"] = fields["password"].get()
             save_settings(self.settings)
 
-            if self.phone:
+            # Cleanup old connection
+            if self.current_call:
                 try:
-                    self.phone.stop()
+                    prm = pj.CallOpParam()
+                    self.current_call.hangup(prm)
                 except:
                     pass
+                self.current_call = None
+
+            if self.acc:
+                try:
+                    self.acc.shutdown()
+                except:
+                    pass
+                self.acc = None
+
+            if self.ep:
+                try:
+                    self.ep.libDestroy()
+                except:
+                    pass
+                self.ep = None
+
             self.is_registered = False
+            self.is_calling = False
             self.status_var.set("Reconnecting...")
             self.indicator.itemconfig(self.indicator_dot, fill="#ffaa00")
             win.destroy()
@@ -382,12 +445,18 @@ class SIPPhoneApp:
     def on_close(self):
         if self.current_call:
             try:
-                self.current_call.hangup()
+                prm = pj.CallOpParam()
+                self.current_call.hangup(prm)
             except:
                 pass
-        if self.phone:
+        if self.acc:
             try:
-                self.phone.stop()
+                self.acc.shutdown()
+            except:
+                pass
+        if self.ep:
+            try:
+                self.ep.libDestroy()
             except:
                 pass
         self.root.destroy()
