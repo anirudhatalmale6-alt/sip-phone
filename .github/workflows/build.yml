@@ -53,6 +53,7 @@ jobs:
           Copy-Item "launcher.bat" "dist\SIP-Phone\launcher.bat"
           Copy-Item "install_protocol.bat" "dist\SIP-Phone\install_protocol.bat"
           Copy-Item "dial.html" "dist\SIP-Phone\dial.html"
+          Copy-Item "call_page.html" "dist\SIP-Phone\call_page.html"
 
       - name: Create ZIP
         shell: powershell
