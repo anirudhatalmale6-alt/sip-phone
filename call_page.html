@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>התקשר אלינו</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #1a1a2e;
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+.card {
+    background: #16213e;
+    border-radius: 16px;
+    padding: 40px;
+    width: 350px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+h1 {
+    color: #e94560;
+    font-size: 26px;
+    margin-bottom: 10px;
+}
+.number {
+    font-size: 28px;
+    color: #fff;
+    margin: 20px 0;
+    direction: ltr;
+    letter-spacing: 2px;
+}
+.btn-call {
+    display: inline-block;
+    background: #4CAF50;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 22px;
+    font-weight: bold;
+    padding: 18px 50px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, transform 0.1s;
+}
+.btn-call:hover {
+    background: #388E3C;
+    transform: scale(1.05);
+}
+.btn-call:active {
+    transform: scale(0.98);
+}
+.note {
+    margin-top: 20px;
+    font-size: 13px;
+    color: #777;
+}
+</style>
+</head>
+<body>
+<div class="card">
+    <h1>התקשר אלינו</h1>
+    <div class="number">0527172458</div>
+    <a class="btn-call" href="sipphone://0527172458">📞 חייג עכשיו</a>
+    <div class="note">לחץ על הכפתור כדי לחייג דרך תוכנת SIP-Phone</div>
+</div>
+</body>
+</html>
