@@ -44,9 +44,7 @@ input[type="tel"] {
     outline: none;
     direction: ltr;
 }
-input[type="tel"]::placeholder {
-    color: #666;
-}
+input[type="tel"]::placeholder { color: #666; }
 .keypad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -62,11 +60,10 @@ input[type="tel"]::placeholder {
     font-weight: bold;
     padding: 12px;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s;
 }
-.keypad button:hover {
-    background: #1a4a8a;
-}
+.keypad button:hover { background: #1a4a8a; }
+.keypad button:active { background: #4CAF50; }
 .buttons {
     display: flex;
     gap: 10px;
@@ -84,9 +81,7 @@ input[type="tel"]::placeholder {
     cursor: pointer;
     transition: background 0.2s;
 }
-.btn-dial:hover {
-    background: #388E3C;
-}
+.btn-dial:hover { background: #388E3C; }
 .btn-hangup {
     flex: 1;
     background: #e94560;
@@ -99,9 +94,7 @@ input[type="tel"]::placeholder {
     cursor: pointer;
     transition: background 0.2s;
 }
-.btn-hangup:hover {
-    background: #c62828;
-}
+.btn-hangup:hover { background: #c62828; }
 .status {
     margin-top: 12px;
     font-size: 13px;
@@ -117,19 +110,19 @@ input[type="tel"]::placeholder {
         <input type="tel" id="phoneNumber" placeholder="הקלד מספר טלפון" autocomplete="off">
     </div>
 
-    <div class="keypad">
-        <button onclick="addDigit('1')">1</button>
-        <button onclick="addDigit('2')">2</button>
-        <button onclick="addDigit('3')">3</button>
-        <button onclick="addDigit('4')">4</button>
-        <button onclick="addDigit('5')">5</button>
-        <button onclick="addDigit('6')">6</button>
-        <button onclick="addDigit('7')">7</button>
-        <button onclick="addDigit('8')">8</button>
-        <button onclick="addDigit('9')">9</button>
-        <button onclick="addDigit('*')">*</button>
-        <button onclick="addDigit('0')">0</button>
-        <button onclick="addDigit('#')">#</button>
+    <div class="keypad" id="keypad">
+        <button onclick="pressKey('1')">1</button>
+        <button onclick="pressKey('2')">2</button>
+        <button onclick="pressKey('3')">3</button>
+        <button onclick="pressKey('4')">4</button>
+        <button onclick="pressKey('5')">5</button>
+        <button onclick="pressKey('6')">6</button>
+        <button onclick="pressKey('7')">7</button>
+        <button onclick="pressKey('8')">8</button>
+        <button onclick="pressKey('9')">9</button>
+        <button onclick="pressKey('*')">*</button>
+        <button onclick="pressKey('0')">0</button>
+        <button onclick="pressKey('#')">#</button>
     </div>
 
     <div class="buttons">
@@ -145,9 +138,17 @@ var KEEPALIVE_URL = 'http://127.0.0.1:48080';
 var phoneInput = document.getElementById('phoneNumber');
 var statusEl = document.getElementById('status');
 var pingInterval = null;
+var inCall = false;
 
-function addDigit(d) {
-    phoneInput.value += d;
+function pressKey(d) {
+    if (inCall) {
+        // During call - send DTMF
+        fetch(KEEPALIVE_URL + '/dtmf/' + d).catch(function(){});
+        statusEl.textContent = 'DTMF: ' + d;
+    } else {
+        // Before call - add to number
+        phoneInput.value += d;
+    }
     phoneInput.focus();
 }
 
@@ -165,15 +166,16 @@ function dialNumber() {
     statusEl.textContent = 'מחייג...';
     window.location.href = 'sipphone://' + number;
 
-    // Start keepalive pings after a short delay
     setTimeout(function() {
         startKeepalive();
-        statusEl.textContent = 'שיחה פעילה - אל תסגור דף זה';
+        inCall = true;
+        statusEl.textContent = 'שיחה פעילה - הקש מספרים לשליחת DTMF';
     }, 2000);
 }
 
 function hangupCall() {
     stopKeepalive();
+    inCall = false;
     fetch(KEEPALIVE_URL + '/hangup').catch(function(){});
     setTimeout(function() {
         window.location.href = 'sipphone://hangup';

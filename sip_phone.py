@@ -137,6 +137,18 @@ class SIPPhoneApp:
                             f.write("hangup")
                     except:
                         pass
+                elif self.path.startswith("/dtmf/"):
+                    digit = self.path[6:]  # Get digit after /dtmf/
+                    if digit in '0123456789*#':
+                        app.send_dtmf(digit)
+                        self.send_response(200)
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.send_header("Content-Type", "text/plain")
+                        self.end_headers()
+                        self.wfile.write(f"sent {digit}".encode())
+                    else:
+                        self.send_response(400)
+                        self.end_headers()
                 else:
                     self.send_response(404)
                     self.end_headers()
@@ -321,14 +333,22 @@ class SIPPhoneApp:
 
     def press_key(self, key):
         self.number_var.set(self.number_var.get() + key)
+        self.send_dtmf(key)
+
+    def send_dtmf(self, digit):
+        """Send DTMF digit during active call (thread-safe via sip_queue)."""
         if self.current_call and self.is_calling and self.pj_loaded:
-            try:
-                dtmf_prm = pj.CallSendDtmfParam()
-                dtmf_prm.digits = key
-                dtmf_prm.method = pj.PJSUA_DTMF_METHOD_RFC2833
-                self.current_call.sendDtmf(dtmf_prm)
-            except:
-                pass
+            def do_dtmf():
+                try:
+                    if self.current_call:
+                        dtmf_prm = pj.CallSendDtmfParam()
+                        dtmf_prm.digits = digit
+                        dtmf_prm.method = pj.PJSUA_DTMF_METHOD_RFC2833
+                        self.current_call.sendDtmf(dtmf_prm)
+                        self.log(f"DTMF sent: {digit}")
+                except Exception as e:
+                    self.log(f"DTMF error: {e}")
+            self.sip_queue.put(do_dtmf)
 
     def on_connect_click(self):
         self.btn_connect.config(state="disabled", text="Connecting...")

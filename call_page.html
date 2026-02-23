@@ -48,13 +48,8 @@ h1 {
     text-decoration: none;
     transition: background 0.2s, transform 0.1s;
 }
-.btn-call:hover {
-    background: #388E3C;
-    transform: scale(1.05);
-}
-.btn-call:active {
-    transform: scale(0.98);
-}
+.btn-call:hover { background: #388E3C; transform: scale(1.05); }
+.btn-call:active { transform: scale(0.98); }
 .btn-hangup {
     display: inline-block;
     background: #e94560;
@@ -69,13 +64,8 @@ h1 {
     margin-top: 15px;
     transition: background 0.2s, transform 0.1s;
 }
-.btn-hangup:hover {
-    background: #c62828;
-    transform: scale(1.05);
-}
-.btn-hangup:active {
-    transform: scale(0.98);
-}
+.btn-hangup:hover { background: #c62828; transform: scale(1.05); }
+.btn-hangup:active { transform: scale(0.98); }
 .status {
     margin-top: 15px;
     font-size: 14px;
@@ -87,15 +77,58 @@ h1 {
     font-size: 13px;
     color: #777;
 }
+.keypad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 15px 0;
+    display: none;
+}
+.keypad.active { display: grid; }
+.keypad button {
+    background: #0f3460;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.keypad button:hover { background: #1a4a8a; }
+.keypad button:active { background: #4CAF50; }
+.dtmf-label {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 5px;
+    display: none;
+}
+.dtmf-label.active { display: block; }
 </style>
 </head>
 <body>
 <div class="card">
     <h1>התקשר אלינו</h1>
     <div class="number">0527172458</div>
-    <button class="btn-call" onclick="dialNumber()">📞 חייג עכשיו</button>
+    <button class="btn-call" id="btnDial" onclick="dialNumber()">📞 חייג עכשיו</button>
     <br>
-    <button class="btn-hangup" onclick="hangupCall()">📕 נתק שיחה</button>
+    <div class="dtmf-label" id="dtmfLabel">הקש מספר במהלך השיחה:</div>
+    <div class="keypad" id="keypad">
+        <button onclick="sendDTMF('1')">1</button>
+        <button onclick="sendDTMF('2')">2</button>
+        <button onclick="sendDTMF('3')">3</button>
+        <button onclick="sendDTMF('4')">4</button>
+        <button onclick="sendDTMF('5')">5</button>
+        <button onclick="sendDTMF('6')">6</button>
+        <button onclick="sendDTMF('7')">7</button>
+        <button onclick="sendDTMF('8')">8</button>
+        <button onclick="sendDTMF('9')">9</button>
+        <button onclick="sendDTMF('*')">*</button>
+        <button onclick="sendDTMF('0')">0</button>
+        <button onclick="sendDTMF('#')">#</button>
+    </div>
+    <button class="btn-hangup" id="btnHangup" onclick="hangupCall()" style="display:none">📕 נתק שיחה</button>
     <div class="status" id="status"></div>
     <div class="note">סגירת הדף מנתקת את השיחה אוטומטית</div>
 </div>
@@ -104,27 +137,41 @@ h1 {
 var KEEPALIVE_URL = 'http://127.0.0.1:48080';
 var pingInterval = null;
 var statusEl = document.getElementById('status');
+var inCall = false;
 
 function dialNumber() {
     statusEl.textContent = 'מחייג...';
     window.location.href = 'sipphone://0527172458';
 
-    // Start keepalive pings after a short delay (let app start)
     setTimeout(function() {
         startKeepalive();
-        statusEl.textContent = 'שיחה פעילה - אל תסגור דף זה';
+        inCall = true;
+        statusEl.textContent = 'שיחה פעילה';
+        document.getElementById('btnDial').style.display = 'none';
+        document.getElementById('btnHangup').style.display = 'inline-block';
+        document.getElementById('keypad').classList.add('active');
+        document.getElementById('dtmfLabel').classList.add('active');
     }, 2000);
 }
 
 function hangupCall() {
     stopKeepalive();
-    // Try HTTP hangup first (more reliable)
+    inCall = false;
     fetch(KEEPALIVE_URL + '/hangup').catch(function(){});
-    // Also try protocol handler as fallback
     setTimeout(function() {
         window.location.href = 'sipphone://hangup';
     }, 200);
     statusEl.textContent = 'השיחה נותקה';
+    document.getElementById('btnDial').style.display = 'inline-block';
+    document.getElementById('btnHangup').style.display = 'none';
+    document.getElementById('keypad').classList.remove('active');
+    document.getElementById('dtmfLabel').classList.remove('active');
+}
+
+function sendDTMF(digit) {
+    if (!inCall) return;
+    fetch(KEEPALIVE_URL + '/dtmf/' + digit).catch(function(){});
+    statusEl.textContent = 'נשלח: ' + digit;
 }
 
 function startKeepalive() {
@@ -141,7 +188,6 @@ function stopKeepalive() {
     }
 }
 
-// Stop keepalive when page closes -> triggers auto-hangup
 window.addEventListener('beforeunload', function() {
     stopKeepalive();
 });
